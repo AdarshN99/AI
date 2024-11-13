@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.models import VectorQuery, SearchQuery
+from azure.search.documents.models import VectorQuery
 from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchField, SearchFieldDataType
 from azure.search.documents.indexes import SearchIndexClient
 
@@ -113,25 +113,18 @@ def search_image():
         # Get vector for query image
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
 
-        # Define the VectorQuery with the correct search parameters
-        vector_query = SearchQuery(
-            query_type="vector",
-            vector=query_vector,
-            fields=["image_vector"],
-            top=3  # Top 3 most similar images
-        )
-
-        # Perform the search
-        results = search_client.search(
-            search_text=None,
-            vector_queries=[vector_query],  # Use 'vector_queries' here
-            select=["description"],
-            top=3  # Fetch top 3 results
+        # Perform the vector search using the vector in search query
+        search_results = search_client.search(
+            search_text=None,  # No text search, only vector search
+            vector=query_vector,  # Pass vector as parameter
+            vector_field_name="image_vector",  # Name of the vector field
+            top=3,  # Fetch top 3 results
+            include_total_count=True
         )
 
         # Format and return results
         output = []
-        for result in results:
+        for result in search_results:
             output.append({
                 "description": result["description"]
             })
