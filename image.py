@@ -9,8 +9,10 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorQuery
+from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchField, SearchFieldDataType
+from azure.search.documents.indexes import SearchIndexClient
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
 
 # Azure configurations
@@ -19,6 +21,7 @@ index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
 key = os.getenv("AZURE_SEARCH_ADMIN_KEY")
 aiVisionApiKey = os.getenv("AZURE_AI_VISION_API_KEY")
 aiVisionRegion = os.getenv("AZURE_AI_VISION_REGION")
+aiVisionEndpoint = os.getenv("AZURE_AI_VISION_ENDPOINT")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -26,8 +29,9 @@ app = Flask(__name__)
 # Set up Azure Search Client
 credential = AzureKeyCredential(key)
 search_client = SearchClient(endpoint=service_endpoint, index_name=index_name, credential=credential)
+index_client = SearchIndexClient(endpoint=service_endpoint, credential=credential)
 
-# Absolute path for the 'images' folder in the project
+# Folder containing images
 PROJECT_DIR = os.getcwd()
 IMAGES_DIR = os.path.join(PROJECT_DIR, "images")
 
@@ -67,28 +71,58 @@ def get_image_vector(image_path, key, region):
         print(f"Timeout/Error for {image_path}. Retrying...")
         raise
 
+# Push images to Azure Search index
+@app.route("/push_images", methods=["POST"])
+def push_images():
+    try:
+        image_embeddings = {}
+        files = os.listdir(IMAGES_DIR)
+
+        for file in files:
+            image_path = os.path.join(IMAGES_DIR, file)
+            image_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
+            image_embeddings[file] = image_vector
+
+        input_data = []
+        counter = 0
+
+        for file, vector in image_embeddings.items():
+            input_data.append({
+                "id": str(counter),
+                "description": file,
+                "image_vector": vector
+            })
+            counter += 1
+
+        # Upload documents to Azure Search
+        result = search_client.upload_documents(input_data)
+        return jsonify({"message": f"Uploaded {len(input_data)} documents successfully."}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Search for similar images based on input image
 @app.route("/search_image", methods=["POST"])
 def search_image():
     try:
-        # Get image path and 'k' value from the request body
+        # Get image path from request body
         image_name = request.json.get("image_path")
         image_path = os.path.join(IMAGES_DIR, image_name)  # Full path in 'images' folder
-        k = request.json.get("k", 3)  # Default value of k is 3
 
-        # Get the vector for the query image
+        # Get vector for query image
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
 
         # Define the VectorQuery
-        vector_query = VectorQuery(vector=query_vector, k=k, fields=["image_vector"])
+        vector_query = VectorQuery(vector=query_vector, k=3, fields=["image_vector"])
 
         # Perform the search
         results = search_client.search(
             search_text=None,
-            vector_queries=[vector_query],  # Corrected keyword
+            vector_queries=[vector_query],  # Use 'vector_queries' here
             select=["description"]
         )
 
-        # Format the results
+        # Format and return results
         output = []
         for result in results:
             output.append({
