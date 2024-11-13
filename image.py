@@ -8,9 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.models import VectorizedQuery  # Correct import for VectorizedQuery
-from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchField, SearchFieldDataType
+from azure.search.documents.models import VectorizedQuery
 
 # Load environment variables
 load_dotenv()
@@ -21,7 +19,6 @@ index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
 key = os.getenv("AZURE_SEARCH_ADMIN_KEY")
 aiVisionApiKey = os.getenv("AZURE_AI_VISION_API_KEY")
 aiVisionRegion = os.getenv("AZURE_AI_VISION_REGION")
-aiVisionEndpoint = os.getenv("AZURE_AI_VISION_ENDPOINT")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -29,7 +26,6 @@ app = Flask(__name__)
 # Set up Azure Search Client
 credential = AzureKeyCredential(key)
 search_client = SearchClient(endpoint=service_endpoint, index_name=index_name, credential=credential)
-index_client = SearchIndexClient(endpoint=service_endpoint, credential=credential)
 
 # Folder containing images
 PROJECT_DIR = os.getcwd()
@@ -95,7 +91,7 @@ def push_images():
             counter += 1
 
         # Upload documents to Azure Search
-        result = search_client.upload_documents(input_data)
+        result = search_client.upload_documents(documents=input_data)
         return jsonify({"message": f"Uploaded {len(input_data)} documents successfully."}), 200
 
     except Exception as e:
@@ -112,17 +108,15 @@ def search_image():
         # Get vector for query image
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
 
-        # Perform the vector search using the vector in search query
+        # Create the vectorized query
         vectorized_query = VectorizedQuery(
-            vector=query_vector,  # Pass vector as parameter
-            field_name="image_vector",  # Name of the vector field
-            k=3  # Fetch top 3 results
+            vector=query_vector,  # The vectorized image for similarity search
+            k=3,                  # Number of similar images to return
+            fields="image_vector"  # Name of the vector field in the index
         )
 
-        search_results = search_client.search(
-            search_text=None,  # No text search, only vector search
-            vectorized_query=vectorized_query  # Use VectorizedQuery for vector-based search
-        )
+        # Execute the vector search query
+        search_results = search_client.search(vectorized_query)
 
         # Format and return results
         output = []
