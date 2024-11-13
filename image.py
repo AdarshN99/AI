@@ -112,8 +112,13 @@ def search_image():
         # Get vector for query image
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
 
-        # Define the VectorQuery
-        vector_query = VectorQuery(vector=query_vector, k=3, fields=["image_vector"])
+        # Define the VectorQuery with the correct 'kind' parameter
+        vector_query = VectorQuery(
+            vector=query_vector, 
+            k=3,  # Number of similar results to return
+            fields=["image_vector"],  # Vector field name
+            kind="HNSW"  # Set the kind parameter to "HNSW" (or use another vector search algorithm)
+        )
 
         # Perform the search
         results = search_client.search(
