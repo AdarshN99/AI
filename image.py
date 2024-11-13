@@ -71,9 +71,11 @@ def search_similar_images():
     
     # Prepare the vectorized query
     vectorized_query = VectorizedQuery(
-        vector=query_vector,
-        k=2,  # Restrict results to top 2 images
-        fields="image_vector"
+        kind="vector",
+        k_nearest_neighbors=2,
+        fields="image_vector",
+        exhaustive=2,
+        vector=query_vector,        
     )
 
     # Perform vector search in Azure Search
