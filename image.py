@@ -1,20 +1,20 @@
 import os
 import json
+import requests
+import http.client, urllib.parse
 import base64
-from flask import Flask, jsonify
+import re
 from dotenv import load_dotenv
+from flask import Flask, request, jsonify
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchField, SearchFieldDataType
+from azure.search.documents.models import VectorSearch, VectorizedQuery
 from tenacity import retry, stop_after_attempt, wait_fixed
-import urllib.parse
-import http.client
-import requests
 
 # Load environment variables
 load_dotenv()
-
-# Azure Cognitive Search credentials and parameters
 service_endpoint = os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")
 index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
 api_version = os.getenv("AZURE_SEARCH_API_VERSION")
@@ -23,28 +23,26 @@ aiVisionApiKey = os.getenv("AZURE_AI_VISION_API_KEY")
 aiVisionRegion = os.getenv("AZURE_AI_VISION_REGION")
 aiVisionEndpoint = os.getenv("AZURE_AI_VISION_ENDPOINT")
 
-# Azure Cognitive Search client
+# Set up Azure Cognitive Search client
 credential = AzureKeyCredential(key)
 search_client = SearchClient(endpoint=service_endpoint, index_name=index_name, credential=credential)
 
-# Flask app setup
+# Set up Flask app
 app = Flask(__name__)
 
-# Image upload folder
+# Path to images folder in your project
 FILE_PATH = 'images'
 
+# Sanitize file names to conform to Azure Cognitive Search ID constraints
+def sanitize_id(filename):
+    return re.sub(r'[^a-zA-Z0-9_-]', '_', filename)
 
+# Function to get image vector using Azure Vision API
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
 def get_image_vector(image_path, key, region):
-    """Function to get vector for the image."""
-    headers = {
-        'Ocp-Apim-Subscription-Key': key,
-    }
-
-    params = urllib.parse.urlencode({
-        'model-version': '2023-04-15',
-    })
-
+    headers = {'Ocp-Apim-Subscription-Key': key}
+    params = urllib.parse.urlencode({'model-version': '2023-04-15'})
+    
     try:
         if image_path.startswith(('http://', 'https://')):
             headers['Content-Type'] = 'application/json'
@@ -63,97 +61,86 @@ def get_image_vector(image_path, key, region):
 
         if response.status != 200:
             raise Exception(f"Error processing image {image_path}: {data.get('message', '')}")
-
+        
         return data.get("vector")
 
     except (requests.exceptions.Timeout, http.client.HTTPException) as e:
         print(f"Timeout/Error for {image_path}. Retrying...")
         raise
 
+# Function to convert an image to base64 encoding
+def image_to_base64(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode('utf-8')
 
-@app.route('/upload_all_images', methods=['POST'])
-def upload_all_images():
-    """Uploads all images in the images folder, vectorizes them, and pushes to Azure Cognitive Search."""
-    image_files = os.listdir(FILE_PATH)
+# Upload images and vectors to Azure Search
+def upload_images_to_search():
+    files = os.listdir(FILE_PATH)
+    image_embeddings = {}
 
-    # Only process image files
-    image_files = [f for f in image_files if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    for file in files:
+        file_path = os.path.join(FILE_PATH, file)
+        image_embeddings[file] = get_image_vector(file_path, aiVisionApiKey, aiVisionRegion)
 
-    # Collect all documents to upload to Azure Search
     documents = []
+    for counter, file in enumerate(files):
+        sanitized_id = sanitize_id(file)
+        document = {
+            "id": sanitized_id,
+            "description": file,
+            "image_vector": image_embeddings[file]
+        }
+        documents.append(document)
 
-    for image_filename in image_files:
-        image_path = os.path.join(FILE_PATH, image_filename)
-        try:
-            # Get the vector for the image
-            image_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
-            
-            # Prepare document to upload
-            doc = {
-                "id": image_filename,  # Using filename as the unique ID
-                "description": image_filename,
-                "image_vector": image_vector
-            }
-            documents.append(doc)
-        
-        except Exception as e:
-            return jsonify({"error": f"Error processing image {image_filename}: {str(e)}"}), 500
+    # Upload documents to Azure Search
+    result = search_client.upload_documents(documents)
+    print(f"Uploaded {len(documents)} documents successfully.")
 
-    # Upload all the documents to Azure Search
-    if documents:
-        try:
-            search_client.upload_documents(documents=documents)
-            return jsonify({"message": f"Successfully uploaded {len(documents)} images to Azure Cognitive Search."}), 200
-        except Exception as e:
-            return jsonify({"error": f"Error uploading images to Azure Search: {str(e)}"}), 500
-    else:
-        return jsonify({"message": "No images to upload."}), 200
+@app.route('/search', methods=['POST'])
+def search_similar_images():
+    file = request.files.get('image')
+    
+    if not file:
+        return jsonify({"error": "No image file provided"}), 400
+    
+    # Save the uploaded file temporarily
+    uploaded_image_path = os.path.join('uploads', file.filename)
+    file.save(uploaded_image_path)
 
+    # Get vector for the uploaded image
+    query_vector = get_image_vector(uploaded_image_path, aiVisionApiKey, aiVisionRegion)
 
-@app.route('/search_image', methods=['POST'])
-def search_image():
-    """Search for similar images in Azure Cognitive Search."""
-    if 'image' not in request.files:
-        return jsonify({"error": "No image part in the request"}), 400
-
-    image = request.files['image']
-    image_path = os.path.join(FILE_PATH, image.filename)
-    image.save(image_path)
-
-    try:
-        image_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
-    except Exception as e:
-        return jsonify({"error": f"Error processing image: {str(e)}"}), 500
-
-    vector_query = VectorizedQuery(
+    # Create VectorizedQuery for similarity search
+    vectorized_query = VectorizedQuery(
         kind="vector",
-        k_nearest_neighbors=2,
-        fields="image_vector",
-        vector=image_vector,
-        exhaustive=True
-        
+        vector=query_vector,
+        k_nearest_neighbors=2,  # Limit to top 2 similar images
+        fields="image_vector",  # Field in the index that stores image vectors
+        exhaustive=True,
     )
 
+    # Perform the search using VectorizedQuery
     results = search_client.search(
-        search_text=None,
-        vector_queries=[vector_query],
+        search_text=None, 
+        vector_queries=[vectorized_query],
         select=["description"]
     )
 
+    # Return similar images as base64 encoded images
     similar_images = []
     for result in results:
         image_path = os.path.join(FILE_PATH, result["description"])
-        with open(image_path, "rb") as img_file:
-            img_data = img_file.read()
-            encoded_image = base64.b64encode(img_data).decode('utf-8')
-
+        encoded_image = image_to_base64(image_path)  # Convert image to base64
         similar_images.append({
-            "description": result["description"],
-            "image_data": encoded_image
+            "image_name": result["description"],
+            "image_base64": encoded_image
         })
+    
+    return jsonify({"similar_images": similar_images})
 
-    return jsonify({"similar_images": similar_images}), 200
+if __name__ == "__main__":
+    # Upload images to Azure Cognitive Search initially
+    upload_images_to_search()
 
-
-if __name__ == '__main__':
+    # Run the Flask app
     app.run(debug=True)
