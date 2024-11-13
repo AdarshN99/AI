@@ -73,12 +73,11 @@ def search_image():
         # Create the vectorized query
         vectorized_query = VectorizedQuery(
             vector=query_vector,
-            k=2,  # Retrieve top 2 results
             fields="image_vector"
         )
 
-        # Execute the vector search query
-        search_results = search_client.search(vectorized_query)
+        # Execute the vector search query with 'top' parameter to restrict to top 2 results
+        search_results = search_client.search(vectorized_query, top=2)
 
         # Format and return results with base64-encoded images
         output = []
