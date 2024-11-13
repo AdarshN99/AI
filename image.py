@@ -1,44 +1,50 @@
-# Import required libraries
-from flask import Flask, request, jsonify
 import os
 import json
 import requests
-import http.client, urllib.parse
-from dotenv import load_dotenv
+import http.client
+import urllib.parse
+from flask import Flask, request, jsonify
 from tenacity import retry, stop_after_attempt, wait_fixed
+from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorQuery
-from azure.identity import DefaultAzureCredential
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
+
+# Azure configurations
 service_endpoint = os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")
 index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
-api_version = os.getenv("AZURE_SEARCH_API_VERSION")
+key = os.getenv("AZURE_SEARCH_ADMIN_KEY")
 aiVisionApiKey = os.getenv("AZURE_AI_VISION_API_KEY")
 aiVisionRegion = os.getenv("AZURE_AI_VISION_REGION")
-aiVisionEndpoint = os.getenv("AZURE_AI_VISION_ENDPOINT")
-credential = DefaultAzureCredential()
 
-# Initialize Azure Search Client
-search_client = SearchClient(endpoint=service_endpoint, index_name=index_name, credential=credential)
-
-# Initialize Flask App
+# Initialize Flask app
 app = Flask(__name__)
 
-# Define a function to get image vector
+# Set up Azure Search Client
+credential = AzureKeyCredential(key)
+search_client = SearchClient(endpoint=service_endpoint, index_name=index_name, credential=credential)
+
+# Absolute path for the 'images' folder in the project
+PROJECT_DIR = os.getcwd()
+IMAGES_DIR = os.path.join(PROJECT_DIR, "images")
+
+# Function to get image vector using Azure AI Vision
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
 def get_image_vector(image_path, key, region):
     headers = {
         'Ocp-Apim-Subscription-Key': key,
     }
+
     params = urllib.parse.urlencode({
         'model-version': '2023-04-15',
     })
+
     try:
         if image_path.startswith(('http://', 'https://')):
-            headers['Content-Type'] = 'application/json'
+            headers['Content-Type'] = 'application/json'              
             body = json.dumps({"url": image_path})
         else:
             headers['Content-Type'] = 'application/octet-stream'
@@ -61,12 +67,13 @@ def get_image_vector(image_path, key, region):
         print(f"Timeout/Error for {image_path}. Retrying...")
         raise
 
-# Define a route to perform image vector search
 @app.route("/search_image", methods=["POST"])
 def search_image():
     try:
-        image_path = request.json.get("image_path")
-        k = request.json.get("k", 3)  # Number of results to return
+        # Get image path and 'k' value from the request body
+        image_name = request.json.get("image_path")
+        image_path = os.path.join(IMAGES_DIR, image_name)  # Full path in 'images' folder
+        k = request.json.get("k", 3)  # Default value of k is 3
 
         # Get the vector for the query image
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
