@@ -9,9 +9,8 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.models import VectorQuery
+from azure.search.documents.models import VectorizedQuery  # Correct import for VectorizedQuery
 from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchField, SearchFieldDataType
-from azure.search.documents.indexes import SearchIndexClient
 
 # Load environment variables
 load_dotenv()
@@ -114,12 +113,15 @@ def search_image():
         query_vector = get_image_vector(image_path, aiVisionApiKey, aiVisionRegion)
 
         # Perform the vector search using the vector in search query
+        vectorized_query = VectorizedQuery(
+            vector=query_vector,  # Pass vector as parameter
+            field_name="image_vector",  # Name of the vector field
+            k=3  # Fetch top 3 results
+        )
+
         search_results = search_client.search(
             search_text=None,  # No text search, only vector search
-            vector=query_vector,  # Pass vector as parameter
-            vector_field_name="image_vector",  # Name of the vector field
-            top=3,  # Fetch top 3 results
-            include_total_count=True
+            vectorized_query=vectorized_query  # Use VectorizedQuery for vector-based search
         )
 
         # Format and return results
