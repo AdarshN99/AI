@@ -84,7 +84,7 @@ def search_image():
         # Perform the search
         results = search_client.search(
             search_text=None,
-            vectors=[vector_query],
+            vector_queries=[vector_query],  # Corrected keyword
             select=["description"]
         )
 
