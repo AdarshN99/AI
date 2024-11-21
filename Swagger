@@ -1,0 +1,184 @@
+openapi: 3.0.0
+info:
+  title: DevEdgeSearch API
+  description: This API performs a semantic search and provides a streaming response for successful results or structured JSON error responses for failures.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+paths:
+  /devedgesearch:
+    post:
+      summary: Perform a semantic search
+      description: Accepts a JSON payload with a "question" and streams results on success. For errors, it returns JSON error messages with relevant status codes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                  description: The search query provided by the user.
+              required:
+                - question
+              example:
+                question: "What is Azure Search?"
+      responses:
+        '200':
+          description: Successfully streams search results.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: A streaming response with search results.
+                example: |
+                  data: Starting stream...
+                  data: Result 1
+                  data: Result 2
+                  data: End of stream
+        '400':
+          description: Bad request due to invalid input or arguments.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 400
+                  code:
+                    type: string
+                    example: BAD_REQUEST
+                  error:
+                    type: string
+                    example: "Invalid argument"
+        '401':
+          description: Unauthorized access due to invalid credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 401
+                  code:
+                    type: string
+                    example: UNAUTHORIZED
+                  error:
+                    type: string
+                    example: "Invalid credentials"
+        '403':
+          description: Forbidden access due to insufficient permissions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 403
+                  code:
+                    type: string
+                    example: FORBIDDEN
+                  error:
+                    type: string
+                    example: "Access denied"
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 404
+                  code:
+                    type: string
+                    example: NOT_FOUND
+                  error:
+                    type: string
+                    example: "Resource not found"
+        '409':
+          description: Conflict error, such as a concurrent modification issue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 409
+                  code:
+                    type: string
+                    example: CONFLICT
+                  error:
+                    type: string
+                    example: "Conflict detected"
+        '422':
+          description: Unprocessable entity due to semantic issues with the request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 422
+                  code:
+                    type: string
+                    example: UNPROCESSABLE_ENTITY
+                  error:
+                    type: string
+                    example: "Invalid data provided"
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 429
+                  code:
+                    type: string
+                    example: QUOTA_EXCEEDED
+                  error:
+                    type: string
+                    example: "Rate limit exceeded"
+        '500':
+          description: Internal server error due to an unexpected issue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 500
+                  code:
+                    type: string
+                    example: INTERNAL_SERVER_ERROR
+                  error:
+                    type: string
+                    example: "An unexpected error occurred"
+        '503':
+          description: Service unavailable due to temporary server overload or maintenance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 503
+                  code:
+                    type: string
+                    example: SERVICE_UNAVAILABLE
+                  error:
+                    type: string
+                    example: "Service is temporarily unavailable"
